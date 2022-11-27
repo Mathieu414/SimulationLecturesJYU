@@ -88,7 +88,7 @@ def prepare(env, pr, ot, rr, patient_number, time_of_arrival, process_times):
 
 
 def operate(env, ot, rr, patient_number, time_of_arrival, process_times):
-    with ot.request() as req:
+    with ot.request() as req1, rr.request as req2:
         print('%3d enters the operation queue at %.2f' %
               (patient_number, env.now))
 
@@ -98,7 +98,9 @@ def operate(env, ot, rr, patient_number, time_of_arrival, process_times):
         tme_in_queue_operation.append(queue_in_operation)
         len_in_queue_operation.append(length)
 
-        yield req
+        # the patient must wait until the operation room is free AND a recovery room is free
+        yield req1
+        yield req2
         print('%3d starts operation at %.2f' %
               (patient_number, env.now))
 
@@ -122,37 +124,21 @@ def operate(env, ot, rr, patient_number, time_of_arrival, process_times):
 
 
 def recover(env, rr, patient_number, time_of_arrival, process_times):
-    with rr.request() as req:
-        print('%3d enters the recovery queue at %.2f' %
-              (patient_number, env.now))
+    print('%3d enters the recovery queue at %.2f' %
+          (patient_number, env.now))
 
-        queue_in_recovery = env.now
-        arrivals_recovery.append(queue_in_recovery)
-        length = len(rr.queue)
-        tme_in_queue_recovery.append(queue_in_recovery)
-        len_in_queue_recovery.append(length)
+    arrivals_recovery.append(env.now)
 
-        yield req
-        print('%3d leaves the recovery queue at %.2f' %
-              (patient_number, env.now))
+    # normal distribution for the recovery process
+    r_normal = norm.rvs(loc=process_times[4],
+                        scale=process_times[5], size=1)
+    yield env.timeout(r_normal)
+    print("%3d recovery duration was %.2f" % (patient_number, r_normal))
 
-        queue_out_recovery = env.now
-        length = len(rr.queue)
-        tme_in_queue_recovery.append(queue_out_recovery)
-        len_in_queue_recovery.append(length)
-
-        # normal distribution for the recovery process
-        r_normal = norm.rvs(loc=process_times[4],
-                            scale=process_times[5], size=1)
-        yield env.timeout(r_normal)
-        print("%3d recovery duration was %.2f" % (patient_number, r_normal))
-
-        time_of_departure = env.now
-        departures_recovery.append(time_of_departure)
-        time_in_system = time_of_departure - time_of_arrival
-        in_system.append(time_in_system)
-        time_in_queue_recovery = queue_out_recovery - queue_in_recovery
-        in_queue_recovery.append(time_in_queue_recovery)
+    time_of_departure = env.now
+    departures_recovery.append(time_of_departure)
+    time_in_system = time_of_departure - time_of_arrival
+    in_system.append(time_in_system)
 
 
 def avg_line(df_length):
@@ -205,8 +191,6 @@ if __name__ == '__main__':
     tme_in_queue_operation, len_in_queue_operation = [], []
 
     arrivals_recovery, departures_recovery = [], []
-    in_queue_recovery, in_recovery = [], []
-    tme_in_queue_recovery, len_in_queue_recovery = [], []
 
     in_system = []
 
@@ -235,8 +219,6 @@ if __name__ == '__main__':
         tme_in_queue_preparation, len_in_queue_preparation, in_queue_preparation)
     (avg_length_op,  utilization_op, avg_delay_inqueue_operation, df_length_op) = queue_analytics(
         tme_in_queue_operation, len_in_queue_operation, in_queue_operation)
-    (avg_length_rec,  utilization_rec, avg_delay_inqueue_recovery, df_length_rec) = queue_analytics(
-        tme_in_queue_recovery, len_in_queue_recovery, in_queue_recovery)
 
     df_arrival = pd.DataFrame(arrivals_preparation,   columns=['arrivals'])
     df_start_operation = pd.DataFrame(
@@ -255,19 +237,15 @@ if __name__ == '__main__':
           (avg_delay_inqueue_preparation))
     print('The average delay in operation queue is %.2f' %
           (avg_delay_inqueue_operation))
-    print('The average delay in recovery queue is %.2f' %
-          (avg_delay_inqueue_recovery))
     print('The average delay in system is %.2f' % (avg_delay_insyst))
     print('The average number of patients in preparation queue is %.2f' %
           (avg_length_prep))
     print('The average number of patients in operation queue is %.2f' %
           (avg_length_op))
-    print('The average number of patients in recovery queue is %.2f' %
-          (avg_length_rec))
     print('The utilization of the preparation server is %.2f' %
           (utilization_prep))
     print('The utilization of the operation server is %.2f' % (utilization_op))
-    print('The utilization of the recovery server is %.2f' % (utilization_rec))
+    #print('The utilization of the recovery server is %.2f' % (utilization_rec))
 
     # plotting the arrivals and departures from the different services
     fig = go.Figure()
@@ -305,14 +283,3 @@ if __name__ == '__main__':
                        yaxis_title='Number of Patients',
                        width=800, height=600)
     fig2.write_html('second_figure.html', auto_open=True)
-
-    # plotting the recovery queue
-    fig3 = go.Figure(go.Waterfall(x=df_length_rec['time'],
-                                  y=df_length_rec['len'],
-                                  measure=['absolute'] * 100,
-                                  connector={"line": {"color": "red"}}))
-    fig3.update_layout(title='Number of Patients in Operation Queue',
-                       xaxis_title='Time',
-                       yaxis_title='Number of Patients',
-                       width=800, height=600)
-    fig3.write_html('third_figure.html', auto_open=True)
